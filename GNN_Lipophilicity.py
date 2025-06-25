@@ -60,7 +60,6 @@ class LipophilicityDataset(Dataset):
     def __init__(self, csv_file):
         self.df = pd.read_csv(csv_file)
         self.data_list = []
-
         for _, row in self.df.iterrows():
             data = mol_to_graph(row['smiles'])
             if data is not None:
