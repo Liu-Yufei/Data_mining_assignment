@@ -215,10 +215,10 @@ def evaluate(model, loader):
     y_true = np.concatenate(y_true, axis=0)
     y_score = np.concatenate(y_score, axis=0)
 
-    # micro
+    # macro
     try:
-        auroc = roc_auc_score(y_true.ravel(), y_score.ravel(), average="micro")
-        aupr = average_precision_score(y_true.ravel(), y_score.ravel(), average="micro")
+        auroc = roc_auc_score(y_true, y_score, average="macro")
+        aupr = average_precision_score(y_true, y_score, average="macro")
     except ValueError:
         auroc, aupr = 0.0, 0.0
     return auroc, aupr, y_true, y_score
@@ -245,7 +245,7 @@ def main():
     patience_counter = 0
     max_patience = 15
     
-    for epoch in range(1, 201):  # 增加训练轮数
+    for epoch in range(1, 1001):  # 增加训练轮数
         loss = train(model, train_loader, optimizer, criterion)
         auroc, aupr, y_true, y_score = evaluate(model, test_loader)
         
@@ -255,7 +255,7 @@ def main():
         
         print(f"Epoch {epoch:03d}: Loss={loss:.4f} | AUROC={auroc:.4f} | AUPR={aupr:.4f}")
         
-        if auroc > best_auroc:
+        if auroc > best_auroc and auroc > 70:
             best_auroc = auroc
             torch.save(model.state_dict(), "best_model_1e_5.pth")
             print(f"New best model saved with AUROC: {best_auroc:.4f}")
@@ -282,33 +282,35 @@ def main():
 def draw_curves(y_true, y_score, num_classes):
     plt.figure(figsize=(12, 5))
 
-    # Micro ROC
+    # Macro ROC
     plt.subplot(1, 2, 1)
     try:
-        fpr, tpr, _ = roc_curve(y_true.ravel(), y_score.ravel())
-        plt.plot(fpr, tpr, label='micro-average ROC')
+        for i in range(num_classes):
+            fpr, tpr, _ = roc_curve(y_true[:, i], y_score[:, i])
+            plt.plot(fpr, tpr, label=f'class {i}')
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.title("Macro-average ROC Curve")
+        plt.xlabel("FPR")
+        plt.ylabel("TPR")
+        plt.legend(fontsize=7, ncol=2)
     except:
         pass
-    plt.plot([0, 1], [0, 1], 'k--')
-    plt.title("Micro-average ROC Curve")
-    plt.xlabel("FPR")
-    plt.ylabel("TPR")
-    plt.legend(fontsize=9)
 
-    # Micro PR
+    # Macro PR
     plt.subplot(1, 2, 2)
     try:
-        precision, recall, _ = precision_recall_curve(y_true.ravel(), y_score.ravel())
-        plt.plot(recall, precision, label='micro-average PR')
+        for i in range(num_classes):
+            precision, recall, _ = precision_recall_curve(y_true[:, i], y_score[:, i])
+            plt.plot(recall, precision, label=f'class {i}')
+        plt.title("Macro-average PR Curve")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.legend(fontsize=7, ncol=2)
     except:
         pass
-    plt.title("Micro-average PR Curve")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.legend(fontsize=9)
 
     plt.tight_layout()
-    plt.savefig("curves_micro.png")
+    plt.savefig("curves_macro.png")
     plt.show()
 
 def plot_confusion_matrices(y_true, y_score, num_classes, threshold=0.5):
