@@ -14,10 +14,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import seaborn as sns
-
+import argparse
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# ========== 数据集处理 ==========
+# Dataset class for SIDER
 class SIDERDataset(Dataset):
     def __init__(self, csv_path):
         df = pd.read_csv(csv_path)
@@ -33,27 +33,25 @@ class SIDERDataset(Dataset):
             return None
         mol = Chem.AddHs(mol)
         
-        # 增强的原子特征 - 使用更稳定的方法避免警告
         x = []
         for atom in mol.GetAtoms():
-            # 基础原子特征
             features = [
-                atom.GetAtomicNum() / 100.0,  # 标准化原子序数
-                atom.GetDegree() / 10.0,      # 标准化度数
-                atom.GetFormalCharge(),       # 形式电荷
-                int(atom.GetHybridization()) / 10.0,  # 杂化类型
-                int(atom.GetIsAromatic()),    # 是否芳香族
-                atom.GetMass() / 100.0,       # 标准化原子质量
-                int(atom.IsInRing()),         # 是否在环中
-                atom.GetTotalNumHs() / 10.0,  # 氢原子数
-                int(atom.GetChiralTag()) / 10.0,  # 手性标签
-                # 避免使用会产生警告的方法，用更安全的替代
-                len([x for x in atom.GetNeighbors()]) / 10.0,  # 邻居数量
-                float(atom.GetAtomicNum() in [6, 7, 8, 9, 15, 16, 17, 35, 53]),  # 常见药物原子
-                int(atom.IsInRingSize(3)),    # 三元环
-                int(atom.IsInRingSize(4)),    # 四元环  
-                int(atom.IsInRingSize(5)),    # 五元环
-                int(atom.IsInRingSize(6)),    # 六元环
+                atom.GetAtomicNum() / 100.0,  
+                atom.GetDegree() / 10.0,      
+                atom.GetFormalCharge(),       
+                int(atom.GetHybridization()) / 10.0,  
+                int(atom.GetIsAromatic()),    
+                atom.GetMass() / 100.0,       
+                int(atom.IsInRing()),         
+                atom.GetTotalNumHs() / 10.0,  
+                int(atom.GetChiralTag()) / 10.0,  
+
+                len([x for x in atom.GetNeighbors()]) / 10.0,  
+                float(atom.GetAtomicNum() in [6, 7, 8, 9, 15, 16, 17, 35, 53]),
+                int(atom.IsInRingSize(3)), 
+                int(atom.IsInRingSize(4)), 
+                int(atom.IsInRingSize(5)), 
+                int(atom.IsInRingSize(6)), 
             ]
             x.append(features)
         
@@ -65,16 +63,16 @@ class SIDERDataset(Dataset):
             j = bond.GetEndAtomIdx()
             bond_type = bond.GetBondType()
             bond_features = [
-                float(bond_type) / 10.0,      # 标准化键类型
-                int(bond.GetIsAromatic()),    # 是否芳香键
-                int(bond.IsInRing()),         # 是否在环中
+                float(bond_type) / 10.0,  
+                int(bond.GetIsAromatic()),
+                int(bond.IsInRing()),     
             ]
-            # 无向图，添加双向边
+
             edge_indices.extend([[i, j], [j, i]])
             edge_attr.extend([bond_features, bond_features])
         
         if len(edge_indices) == 0:
-            # 如果没有边，创建自环
+
             num_atoms = len(x)
             edge_indices = [[i, i] for i in range(num_atoms)]
             edge_attr = [[0.0, 0.0, 0.0] for _ in range(num_atoms)]
@@ -113,7 +111,7 @@ class ImprovedGCN(nn.Module):
         
         
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim * 3, hidden_dim * 2),  # 3种池化的拼接
+            nn.Linear(hidden_dim * 3, hidden_dim * 2), 
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 2, hidden_dim),
@@ -124,8 +122,7 @@ class ImprovedGCN(nn.Module):
 
     def forward(self, data):
         x, edge_index, batch = data.x, data.edge_index, data.batch
-        
-        # GCN layers
+
         for i in range(self.num_layers):
             x = self.convs[i](x, edge_index)
             x = self.batch_norms[i](x)
@@ -143,49 +140,6 @@ class ImprovedGCN(nn.Module):
         out = self.classifier(x)
         return out
 
-class GATModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, num_heads=4, num_layers=3, dropout=0.2):
-        super(GATModel, self).__init__()
-        self.num_layers = num_layers
-        self.dropout = dropout
-        
-        # GAT层
-        self.convs = nn.ModuleList()
-        self.convs.append(GATConv(input_dim, hidden_dim, heads=num_heads, dropout=dropout))
-        for _ in range(num_layers - 1):
-            self.convs.append(GATConv(hidden_dim * num_heads, hidden_dim, heads=num_heads, dropout=dropout))
-        
-        # 分类器
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim * num_heads * 3, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, output_dim)
-        )
-
-    def forward(self, data):
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-        
-        # GAT layers
-        for i in range(self.num_layers):
-            x = self.convs[i](x, edge_index)
-            x = F.relu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        
-        # 多种池化方式的组合
-        x1 = global_mean_pool(x, batch)
-        x2 = global_max_pool(x, batch)
-        x3 = global_add_pool(x, batch)
-        
-        # 拼接不同的池化结果
-        x = torch.cat([x1, x2, x3], dim=1)
-        
-        out = self.classifier(x)
-        return out
-
 
 def train(model, loader, optimizer, criterion):
     model.train()
@@ -194,7 +148,7 @@ def train(model, loader, optimizer, criterion):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
-        # 重新调整 data.y 的形状以匹配 out 的形状
+        
         target = data.y.view(out.shape[0], -1)
         loss = criterion(out, target)
         loss.backward()
@@ -215,7 +169,6 @@ def evaluate(model, loader):
     y_true = np.concatenate(y_true, axis=0)
     y_score = np.concatenate(y_score, axis=0)
 
-    # macro
     try:
         auroc = roc_auc_score(y_true, y_score, average="micro")
         aupr = average_precision_score(y_true, y_score, average="micro")
@@ -224,45 +177,9 @@ def evaluate(model, loader):
     return auroc, aupr, y_true, y_score
 
 
-
-# def draw_curves(y_true, y_score, num_classes):
-#     plt.figure(figsize=(12, 5))
-
-#     # Macro ROC
-#     plt.subplot(1, 2, 1)
-#     try:
-#         for i in range(num_classes):
-#             fpr, tpr, _ = roc_curve(y_true[:, i], y_score[:, i])
-#             plt.plot(fpr, tpr, label=f'class {i}')
-#         plt.plot([0, 1], [0, 1], 'k--')
-#         plt.title("Macro-average ROC Curve")
-#         plt.xlabel("FPR")
-#         plt.ylabel("TPR")
-#         plt.legend(fontsize=7, ncol=2)
-#     except:
-#         pass
-
-#     # Macro PR
-#     plt.subplot(1, 2, 2)
-#     try:
-#         for i in range(num_classes):
-#             precision, recall, _ = precision_recall_curve(y_true[:, i], y_score[:, i])
-#             plt.plot(recall, precision, label=f'class {i}')
-#         plt.title("Macro-average PR Curve")
-#         plt.xlabel("Recall")
-#         plt.ylabel("Precision")
-#         plt.legend(fontsize=7, ncol=2)
-#     except:
-#         pass
-
-#     plt.tight_layout()
-#     plt.savefig("curves_macro.png")
-#     plt.show()
-
 def draw_curves(y_true, y_score, num_classes):
     plt.figure(figsize=(12, 5))
 
-    # Micro ROC
     plt.subplot(1, 2, 1)
     try:
         fpr, tpr, _ = roc_curve(y_true.ravel(), y_score.ravel())
@@ -275,7 +192,6 @@ def draw_curves(y_true, y_score, num_classes):
     plt.ylabel("TPR")
     plt.legend(fontsize=9)
 
-    # Micro PR
     plt.subplot(1, 2, 2)
     try:
         precision, recall, _ = precision_recall_curve(y_true.ravel(), y_score.ravel())
@@ -292,31 +208,24 @@ def draw_curves(y_true, y_score, num_classes):
     plt.show()
 
 def model_train():
-    # 加载数据
     train_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_train.csv')
     test_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_test.csv')
     input_dim = 15
     output_dim = train_dataset.num_classes
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  # 减小batch size
     test_loader = DataLoader(test_dataset, batch_size=32)
-
-    # 使用改进的模型，增加隐藏层维度和层数
     model = ImprovedGCN(input_dim=input_dim, hidden_dim=256, output_dim=output_dim, num_layers=5, dropout=0.3).to(device)
     
-    # 优化器和学习率调度器
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.8, patience=5)
     criterion = nn.BCEWithLogitsLoss()
 
     best_auroc = 0.0
-    patience_counter = 0
     max_patience = 15
     
-    for epoch in range(1, 1001):  # 增加训练轮数
+    for epoch in range(1, 1001):
         loss = train(model, train_loader, optimizer, criterion)
         auroc, aupr, y_true, y_score = evaluate(model, test_loader)
-        
-        # 学习率调度
         
         scheduler.step(auroc)
         
@@ -324,22 +233,12 @@ def model_train():
         
         if auroc > best_auroc and auroc > 70:
             best_auroc = auroc
-            torch.save(model.state_dict(), "best_model_1e_5.pth")
+            torch.save(model.state_dict(), "best_model_1.pth")
             print(f"New best model saved with AUROC: {best_auroc:.4f}")
-            patience_counter = 0
-        else:
-            patience_counter += 1
-        if auroc >= 0.80:
-            print(f"Target AUROC (0.85) achieved at epoch {epoch}!")
-            break
-
-    print(f"Best AUROC achieved: {best_auroc:.4f}")
     
-    # 最终绘图
     draw_curves(y_true, y_score, train_dataset.num_classes)
 
 def model_test():
-    # 加载数据
     train_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_train.csv')
     test_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_test.csv')
     input_dim = 15
@@ -347,13 +246,18 @@ def model_test():
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  # 减小batch size
     test_loader = DataLoader(test_dataset, batch_size=32)
 
-    # 使用改进的模型，增加隐藏层维度和层数
     model = ImprovedGCN(input_dim=input_dim, hidden_dim=256, output_dim=output_dim, num_layers=5, dropout=0.3).to(device)
-    model.load_state_dict(torch.load("best_model_1e_5.pth", map_location=device))
+    model.load_state_dict(torch.load("best_model.pth", map_location=device))
     auroc, aupr, y_true, y_score = evaluate(model, test_loader)
     print(f" AUROC={auroc:.4f} | AUPR={aupr:.4f}")
 
-if __name__ == '__main__':
-    # model_train()
-    model_test()
+    draw_curves(y_true, y_score, train_dataset.num_classes)
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', type=int, default=1, help='0: train, 1: test')
+    args = parser.parse_args()
+    if args.mode == 0:
+        model_train()
+    else:
+        model_test()

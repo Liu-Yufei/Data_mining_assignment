@@ -186,9 +186,8 @@ def test_model():
     rmse = test(model, test_loader, device)
     print(f"Test RMSE: {rmse:.4f}")
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Drug Lipophilicity Prediction")
-    parser.add_argument('--mode', type=int, default='1',
-                    help='test existing model: 1')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', type=int, default=0, help='0: train, 1: test')
     args = parser.parse_args()
     if args.mode == 0:
         train_model()

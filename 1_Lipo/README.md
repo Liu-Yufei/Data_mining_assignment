@@ -34,7 +34,7 @@ pip install -r requirements.txt
 #### 2. 训练模型
 
 ```bash
-python main.py --mode 0
+python GNN_Lipophilicity.py --mode 0
 ```
 
 * 训练集：`../Dataset/1_Lipophilicity/LIPO_train.csv`
@@ -43,10 +43,10 @@ python main.py --mode 0
 #### 3. 使用已训练模型评估测试集
 
 ```bash
-python main.py --mode 1
+python GNN_Lipophilicity.py --mode 1
 ```
 
-* 会加载 `1_LIPO_best_model_1.pt` 并评估测试集 RMSE。
+* 会加载 `1_LIPO_best_model.pt` 并评估测试集 RMSE。
 
 ---
 
