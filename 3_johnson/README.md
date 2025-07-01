@@ -1,6 +1,16 @@
 # 化合物库代表性分子筛选
 
 本项目旨在从 Johnson 化合物库中筛选出结构多样、代表性强的分子子集，以更高效地覆盖整个化学空间，从而优化虚拟筛选与实验验证流程。
+```
+3_johnson/ # 化合物库代表性分子筛选
+│
+├── Johnson.py # 运行代码
+├── 3_johnson.docx # 报告
+├── johnson_tsne_kmeans_optimized.png # t-SNE 聚类可视化结果
+├── representative_molecules_tsne.csv # 可视化与代表分子列表
+├── README.md # 项目说明文档
+└── requirements.txt # 环境要求文档
+```
 
 ---
 

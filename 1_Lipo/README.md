@@ -2,6 +2,16 @@
 
 本项目基于 **图神经网络（GNN）** 中的 **GINEConv** 模型，预测分子在 **pH 7.4** 条件下的辛醇/水分配系数（logD），属于 **回归任务**，目标是将预测的 RMSE 控制在 0.7 以下。
 
+```
+1_Lipo/ # 药物脂溶性预测
+│
+├── GNN_Lipophilicity.py # 运行代码
+├── 1_Lipo.docx # 报告
+├── 1_LIPO_best_model.pt # 权重文件
+├── README.md # 项目说明文档
+└── requirements.txt # 环境要求文档
+```
+
 ---
 
 ### 📂 数据集介绍

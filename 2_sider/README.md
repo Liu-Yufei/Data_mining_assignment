@@ -1,6 +1,16 @@
 ## 🧪 药物副作用预测（Lipophilicity Prediction）
 
 本项目基于 [SIDER](http://sideeffects.embl.de/) 药物不良反应数据库，使用图神经网络（GCN）对化合物的 SMILES 表达式进行图结构建模，以预测其可能的副作用（多标签分类任务）。
+```
+2_sider/ # 药物副作用预测
+│
+├── Sider.py # 运行代码
+├── 2_sider.docx # 报告
+├── best_model.pth # 权重文件
+├── curves_micro.png # AUROC和AUPR文件
+├── README.md # 项目说明文档
+└── requirements.txt # 环境要求文档
+```
 
 ---
 
