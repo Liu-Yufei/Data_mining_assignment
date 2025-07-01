@@ -2,42 +2,25 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data, Dataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import GINConv, global_mean_pool
-from rdkit import Chem
-from rdkit.Chem import AllChem
-import pandas as pd
-from sklearn.metrics import root_mean_squared_error
-import numpy as np
 from torch_geometric.nn import GINEConv, global_mean_pool
-
+from rdkit import Chem
+import pandas as pd
+import numpy as np
+from sklearn.metrics import root_mean_squared_error
+import argparse
+# Feature Encoding
 def one_hot_encoding(value, choices):
     return [int(value == c) for c in choices[:-1]] + [int(value not in choices[:-1])]
 
-def bond_features(bond):
-    bt = bond.GetBondType()
-    bond_type = one_hot_encoding(bt, [Chem.rdchem.BondType.SINGLE,
-                                      Chem.rdchem.BondType.DOUBLE,
-                                      Chem.rdchem.BondType.TRIPLE,
-                                      Chem.rdchem.BondType.AROMATIC])
-    features = bond_type + [
-        int(bond.GetIsConjugated()),
-        int(bond.IsInRing())
-    ]
-    return torch.tensor(features, dtype=torch.float)
-
-
-# 原子特征简单构造
 def atom_features(atom):
     features = []
 
-    # One-hot 原子类型（C, O, N, ...），最多20种
     atom_type = one_hot_encoding(atom.GetSymbol(),
                                   ['C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I', 'H', 'B', 'Si', 'Se', 'Other'])
     features += atom_type
 
-    # 价键数、是否芳香等
     features += [
-        atom.GetAtomicNum() / 100,               # 归一化
+        atom.GetAtomicNum() / 100,
         atom.GetDegree() / 10,
         atom.GetFormalCharge() / 10,
         int(atom.GetIsAromatic())
@@ -45,7 +28,17 @@ def atom_features(atom):
     return torch.tensor(features, dtype=torch.float)
 
 
-# 分子转图结构
+def bond_features(bond):
+    bond_type = one_hot_encoding(bond.GetBondType(), [
+        Chem.rdchem.BondType.SINGLE,
+        Chem.rdchem.BondType.DOUBLE,
+        Chem.rdchem.BondType.TRIPLE,
+        Chem.rdchem.BondType.AROMATIC])
+    return torch.tensor(bond_type + [
+        int(bond.GetIsConjugated()),
+        int(bond.IsInRing())
+    ], dtype=torch.float)
+
 def mol_to_graph(smiles):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -75,7 +68,7 @@ def mol_to_graph(smiles):
     return data
 
 
-# 自定义数据集
+# Dataset
 class LipophilicityDataset(Dataset):
     def __init__(self, csv_file):
         self.df = pd.read_csv(csv_file)
@@ -92,37 +85,7 @@ class LipophilicityDataset(Dataset):
     def __getitem__(self, idx):
         return self.data_list[idx]
 
-# 模型定义
-class GIN(torch.nn.Module):
-    def __init__(self, in_dim, hidden_dim=64):
-        super().__init__()
-        self.conv1 = GINConv(torch.nn.Sequential(
-            torch.nn.Linear(in_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, hidden_dim)
-        ))
-        self.conv2 = GINConv(torch.nn.Sequential(
-            torch.nn.Linear(hidden_dim, hidden_dim),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_dim, hidden_dim)
-        ))
-
-        self.fc1 = torch.nn.Linear(hidden_dim, hidden_dim)
-        self.dropout = torch.nn.Dropout(0.3)
-        self.fc2 = torch.nn.Linear(hidden_dim, 1)
-
-    def forward(self, x, edge_index, batch):
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = global_mean_pool(x, batch)
-        x = self.fc1(x)
-        x = self.dropout(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x.squeeze()
-
+# Model
 class GINE(torch.nn.Module):
     def __init__(self, in_dim, edge_dim, hidden_dim=64):
         super().__init__()
@@ -157,14 +120,13 @@ class GINE(torch.nn.Module):
         return x.squeeze()
 
 
-# 训练函数
+# Training
 def train(model, loader, optimizer, device):
     model.train()
     total_loss = 0
     for data in loader:
         data = data.to(device)
         optimizer.zero_grad()
-        # pred = model(data.x, data.edge_index, data.batch)
         pred = model(data.x, data.edge_index, data.edge_attr, data.batch)
         loss = F.mse_loss(pred, data.y.view(-1))
         loss.backward()
@@ -172,14 +134,13 @@ def train(model, loader, optimizer, device):
         total_loss += loss.item() * data.num_graphs
     return total_loss / len(loader.dataset)
 
-# 测试函数
+# Evaluation
 def test(model, loader, device):
     model.eval()
     preds, labels = [], []
     with torch.no_grad():
         for data in loader:
             data = data.to(device)
-            # pred = model(data.x, data.edge_index, data.batch)
             pred = model(data.x, data.edge_index, data.edge_attr, data.batch)
             preds.append(pred.cpu().numpy())
             labels.append(data.y.view(-1).cpu().numpy())
@@ -188,8 +149,7 @@ def test(model, loader, device):
     rmse = root_mean_squared_error(labels, preds)
     return rmse
 
-# 主函数
-def main():
+def train_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_dataset = LipophilicityDataset('../Dataset/1_Lipophilicity/LIPO_train.csv')
     test_dataset = LipophilicityDataset('../Dataset/1_Lipophilicity/LIPO_test.csv')
@@ -208,13 +168,29 @@ def main():
         print(f"Epoch {epoch}: Loss = {loss:.4f}, RMSE = {rmse:.4f}")
         if rmse < best_rmse:
             best_rmse = rmse
-            torch.save(model.state_dict(), "1_LIPO_best_modelj_5e_3.pt")
+            torch.save(model.state_dict(), "1_LIPO_best_model_1.pt")
 
     print(f"Best RMSE: {best_rmse:.4f}")
 
-if __name__ == "__main__":
-    main()
+def test_model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_dataset = LipophilicityDataset('../Dataset/1_Lipophilicity/LIPO_train.csv')
+    test_dataset = LipophilicityDataset('../Dataset/1_Lipophilicity/LIPO_test.csv')
 
-# lr: 5e-4 0.6303 1_LIPO_best_model.pt
-# lr: 1e-3 0.6563 1_LIPO_best_model_1e_3.pt
-# lr: 5e-3 0.6087 1_LIPO_best_model_5e_3.pt
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
+    model = GINE(in_dim=18, edge_dim=6).to(device)
+    model.load_state_dict(torch.load("1_LIPO_best_model.pt", map_location=device))
+    model.eval()
+    rmse = test(model, test_loader, device)
+    print(f"Test RMSE: {rmse:.4f}")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Drug Lipophilicity Prediction")
+    parser.add_argument('--mode', type=int, default='1',
+                    help='test existing model: 1')
+    args = parser.parse_args()
+    if args.mode == 0:
+        train_model()
+    else:
+        test_model()

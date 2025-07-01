@@ -93,25 +93,25 @@ class SIDERDataset(Dataset):
     def __getitem__(self, idx):
         return self.data_list[idx]
 
-# ========== 模型定义 ==========
+
 class ImprovedGCN(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers=3, dropout=0.2):
         super(ImprovedGCN, self).__init__()
         self.num_layers = num_layers
         self.dropout = dropout
         
-        # GCN层
+        
         self.convs = nn.ModuleList()
         self.convs.append(GCNConv(input_dim, hidden_dim))
         for _ in range(num_layers - 1):
             self.convs.append(GCNConv(hidden_dim, hidden_dim))
         
-        # 批标准化
+        
         self.batch_norms = nn.ModuleList()
         for _ in range(num_layers):
             self.batch_norms.append(nn.BatchNorm1d(hidden_dim))
         
-        # 分类器
+        
         self.classifier = nn.Sequential(
             nn.Linear(hidden_dim * 3, hidden_dim * 2),  # 3种池化的拼接
             nn.ReLU(),
@@ -132,12 +132,12 @@ class ImprovedGCN(nn.Module):
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         
-        # 多种池化方式的组合
+        
         x1 = global_mean_pool(x, batch)
         x2 = global_max_pool(x, batch)
         x3 = global_add_pool(x, batch)
         
-        # 拼接不同的池化结果
+        
         x = torch.cat([x1, x2, x3], dim=1)
         
         out = self.classifier(x)
@@ -186,7 +186,7 @@ class GATModel(nn.Module):
         out = self.classifier(x)
         return out
 
-# ========== 训练 & 评估函数 ==========
+
 def train(model, loader, optimizer, criterion):
     model.train()
     total_loss = 0
@@ -217,18 +217,85 @@ def evaluate(model, loader):
 
     # macro
     try:
-        auroc = roc_auc_score(y_true, y_score, average="macro")
-        aupr = average_precision_score(y_true, y_score, average="macro")
+        auroc = roc_auc_score(y_true, y_score, average="micro")
+        aupr = average_precision_score(y_true, y_score, average="micro")
     except ValueError:
         auroc, aupr = 0.0, 0.0
     return auroc, aupr, y_true, y_score
 
-# ========== 主程序 ==========
-def main():
+
+
+# def draw_curves(y_true, y_score, num_classes):
+#     plt.figure(figsize=(12, 5))
+
+#     # Macro ROC
+#     plt.subplot(1, 2, 1)
+#     try:
+#         for i in range(num_classes):
+#             fpr, tpr, _ = roc_curve(y_true[:, i], y_score[:, i])
+#             plt.plot(fpr, tpr, label=f'class {i}')
+#         plt.plot([0, 1], [0, 1], 'k--')
+#         plt.title("Macro-average ROC Curve")
+#         plt.xlabel("FPR")
+#         plt.ylabel("TPR")
+#         plt.legend(fontsize=7, ncol=2)
+#     except:
+#         pass
+
+#     # Macro PR
+#     plt.subplot(1, 2, 2)
+#     try:
+#         for i in range(num_classes):
+#             precision, recall, _ = precision_recall_curve(y_true[:, i], y_score[:, i])
+#             plt.plot(recall, precision, label=f'class {i}')
+#         plt.title("Macro-average PR Curve")
+#         plt.xlabel("Recall")
+#         plt.ylabel("Precision")
+#         plt.legend(fontsize=7, ncol=2)
+#     except:
+#         pass
+
+#     plt.tight_layout()
+#     plt.savefig("curves_macro.png")
+#     plt.show()
+
+def draw_curves(y_true, y_score, num_classes):
+    plt.figure(figsize=(12, 5))
+
+    # Micro ROC
+    plt.subplot(1, 2, 1)
+    try:
+        fpr, tpr, _ = roc_curve(y_true.ravel(), y_score.ravel())
+        plt.plot(fpr, tpr, label='micro-average ROC')
+    except:
+        pass
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.title("Micro-average ROC Curve")
+    plt.xlabel("FPR")
+    plt.ylabel("TPR")
+    plt.legend(fontsize=9)
+
+    # Micro PR
+    plt.subplot(1, 2, 2)
+    try:
+        precision, recall, _ = precision_recall_curve(y_true.ravel(), y_score.ravel())
+        plt.plot(recall, precision, label='micro-average PR')
+    except:
+        pass
+    plt.title("Micro-average PR Curve")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.legend(fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig("curves_micro.png")
+    plt.show()
+
+def model_train():
     # 加载数据
     train_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_train.csv')
     test_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_test.csv')
-    input_dim = 15  # 更新为增强后的原子特征维度
+    input_dim = 15
     output_dim = train_dataset.num_classes
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  # 减小batch size
     test_loader = DataLoader(test_dataset, batch_size=32)
@@ -262,14 +329,7 @@ def main():
             patience_counter = 0
         else:
             patience_counter += 1
-            
-        # 早停
-        # if patience_counter >= max_patience:
-        #     print(f"Early stopping at epoch {epoch}")
-        #     break
-            
-        # 如果已经达到目标性能，可以提前结束
-        if auroc >= 0.85:
+        if auroc >= 0.80:
             print(f"Target AUROC (0.85) achieved at epoch {epoch}!")
             break
 
@@ -277,63 +337,23 @@ def main():
     
     # 最终绘图
     draw_curves(y_true, y_score, train_dataset.num_classes)
-    plot_confusion_matrices(y_true, y_score, train_dataset.num_classes)
 
-def draw_curves(y_true, y_score, num_classes):
-    plt.figure(figsize=(12, 5))
+def model_test():
+    # 加载数据
+    train_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_train.csv')
+    test_dataset = SIDERDataset('../Dataset/2_SIDER/SIDER_test.csv')
+    input_dim = 15
+    output_dim = train_dataset.num_classes
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)  # 减小batch size
+    test_loader = DataLoader(test_dataset, batch_size=32)
 
-    # Macro ROC
-    plt.subplot(1, 2, 1)
-    try:
-        for i in range(num_classes):
-            fpr, tpr, _ = roc_curve(y_true[:, i], y_score[:, i])
-            plt.plot(fpr, tpr, label=f'class {i}')
-        plt.plot([0, 1], [0, 1], 'k--')
-        plt.title("Macro-average ROC Curve")
-        plt.xlabel("FPR")
-        plt.ylabel("TPR")
-        plt.legend(fontsize=7, ncol=2)
-    except:
-        pass
-
-    # Macro PR
-    plt.subplot(1, 2, 2)
-    try:
-        for i in range(num_classes):
-            precision, recall, _ = precision_recall_curve(y_true[:, i], y_score[:, i])
-            plt.plot(recall, precision, label=f'class {i}')
-        plt.title("Macro-average PR Curve")
-        plt.xlabel("Recall")
-        plt.ylabel("Precision")
-        plt.legend(fontsize=7, ncol=2)
-    except:
-        pass
-
-    plt.tight_layout()
-    plt.savefig("curves_macro.png")
-    plt.show()
-
-def plot_confusion_matrices(y_true, y_score, num_classes, threshold=0.5):
-    """绘制每个类别的混淆矩阵"""
-    y_pred = (y_score >= threshold).astype(int)
-    for i in range(num_classes):
-        cm = confusion_matrix(y_true[:, i], y_pred[:, i])
-        plt.figure(figsize=(3, 3))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-        plt.title(f'Confusion Matrix for Class {i}')
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.tight_layout()
-        plt.savefig(f'confusion_matrix_class_{i}.png')
-        plt.close()
-    print("每个类别的混淆矩阵已保存为 confusion_matrix_class_*.png")
-
+    # 使用改进的模型，增加隐藏层维度和层数
+    model = ImprovedGCN(input_dim=input_dim, hidden_dim=256, output_dim=output_dim, num_layers=5, dropout=0.3).to(device)
+    model.load_state_dict(torch.load("best_model_1e_5.pth", map_location=device))
+    auroc, aupr, y_true, y_score = evaluate(model, test_loader)
+    print(f" AUROC={auroc:.4f} | AUPR={aupr:.4f}")
 
 if __name__ == '__main__':
-    # 可以选择运行单个模型或尝试多个模型
-    # choice = input("Enter 1 for single model training, 2 for multiple model comparison: ")
-    # if choice == "2":
-    #     train_with_different_models()
-    # else:
-    main()
+    # model_train()
+    model_test()
 
