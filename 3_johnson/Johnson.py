@@ -40,7 +40,6 @@ X_reduced = TSNE(n_components=2, perplexity=30, random_state=42).fit_transform(X
 best_score = -np.inf
 best_result = {}
 
-# for n_clusters in [60, 70, 80, 90, 100]:
 kmeans = KMeans(n_clusters=60, random_state=42)
 labels = kmeans.fit_predict(X_reduced)
 
@@ -53,7 +52,6 @@ if sil > 0.3 and ch > 10000 and db < 1.0:
     if score > best_score:
         best_score = score
         best_result = {
-            # 'n_clusters': n_clusters,
             'labels': labels,
             'kmeans': kmeans,
             'sil': sil,
@@ -63,7 +61,6 @@ if sil > 0.3 and ch > 10000 and db < 1.0:
 
 # 可视化与代表分子输出
 if best_result:
-    # n_clusters = best_result['n_clusters']
     labels = best_result['labels']
     kmeans = best_result['kmeans']
     sil = best_result['sil']
@@ -79,9 +76,7 @@ if best_result:
     plt.colorbar(label='Cluster')
     plt.tight_layout()
     plt.savefig('johnson_tsne_kmeans_optimized.png')
-    # plt.show()
-
-    # 代表性分子（每簇中心点最近分子）
+    
     centers, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X_reduced)
     representative_smiles = [valid_smiles[i] for i in centers]
     rep_df = pd.DataFrame({'SMILES': representative_smiles})
